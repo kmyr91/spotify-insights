@@ -16,6 +16,7 @@ def fetch_spotify_data_spotipy():
     
     # Setting up client credentials
     client_id = Variable.get('SPOTIFY_CLIENT_ID')
+    
     client_secret = Variable.get('SPOTIFY_CLIENT_SECRET')
 
     if not client_id or not client_secret:
