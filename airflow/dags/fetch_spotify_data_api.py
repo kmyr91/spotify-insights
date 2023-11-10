@@ -10,6 +10,10 @@ from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
 from airflow.configuration import conf
 
+from sqlalchemy import create_engine
+from sqlalchemy.sql import text 
+
+
 
 AZURE_CONNECTION_STRING = conf.get('azure', 'blob_storage_conn_string')
 
@@ -119,9 +123,31 @@ def upload_to_blob(data, container_name, endpoint_name):
         # Upload the data to Azure Blob Storage
         blob_client.upload_blob(data, overwrite=True)
         logging.info(f"Data successfully uploaded to {container_name}/{blob_name}")
+        return blob_name
     except Exception as e:
         logging.error(f"An error occurred while uploading data to Azure Blob Storage: {e}")
 
+
+def load_data_to_sql(container_name, blob_name, sql_table_name):
+    # Connect to Blob Storage and retrieve data
+    blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+    container_client = blob_service_client.get_container_client(container_name)
+    blob_client = container_client.get_blob_client(blob_name)
+
+    json_data = blob_client.download_blob().readall()
+
+    # Connect to Azure SQL Database and insert data
+    sql_conn_str = conf.get('azure', 'sql_connection_string')
+
+    try: 
+        engine = create_engine(sql_conn_str) 
+
+        with engine.connect() as connection:
+            # Insert JSON data directly into SQL
+            insert_query = text(f"INSERT INTO {sql_table_name} (json_column) VALUES (:json_data)")
+            connection.execute(insert_query, json_data=json_data.decode('utf-8'))
+    except Exception as e:
+        logging.error(f"An error occurred while loading data to Azure SQL Database: {e}")
 
 # DAG definition remains the same
 default_args = {
@@ -170,5 +196,16 @@ upload_to_blob_task = PythonOperator(
     dag=dag,
 )
 
+load_data_to_sql_task = PythonOperator(
+    task_id='load_data_to_sql',
+    python_callable=load_data_to_sql,
+    op_kwargs={
+        'container_name': 'spotify-data',
+        'blob_name': '{{ task_instance.xcom_pull(task_ids="upload_to_blob") }}',
+        'sql_table_name': 'new_releases'
+    },
+    dag=dag,
+)
 
-fetch_spotify_data_task >> check_and_create_container_task >> upload_to_blob_task
+
+fetch_spotify_data_task >> check_and_create_container_task >> upload_to_blob_task >> load_data_to_sql_task
