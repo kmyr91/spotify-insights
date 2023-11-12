@@ -2,6 +2,7 @@ from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from datetime import datetime, timedelta
 import os
+import json
 import requests
 import logging
 import base64
@@ -41,7 +42,6 @@ def fetch_spotify_data_api(endpoint):
 
     if response.status_code != 200:
         logging.error(f"Failed to get access token from Spotify API. Status Code: {response.status_code}")
-        logging.error(f"Response: {response.text}")
         return
 
     response_data = response.json()
@@ -60,12 +60,14 @@ def fetch_spotify_data_api(endpoint):
             "Authorization": f"Bearer {access_token}"
         }
         api_response = requests.get(next_page_url, headers=headers)
+        # logging.info(f"Response: {api_response.text}")
 
         if api_response.status_code != 200:
             logging.error(f"Failed to fetch data from endpoint {endpoint}. Status Code: {api_response.status_code}")
             return results
 
         data = api_response.json()
+        # logging.info(f"data is: {data}")
         albums = data.get('albums', {})
         results.extend(albums.get('items', []))
 
@@ -119,9 +121,15 @@ def upload_to_blob(data, container_name, endpoint_name):
         
         # Create a blob client using the container and blob name
         blob_client = container_client.get_blob_client(blob_name)
+
+        # Convert data to JSON
+        json_data = json.dumps(data, indent=4)
+
+        logging.info(f"data type after json.loads is: {type(json_data)}")
+
         
         # Upload the data to Azure Blob Storage
-        blob_client.upload_blob(data, overwrite=True)
+        blob_client.upload_blob(json_data, overwrite=True)
         logging.info(f"Data successfully uploaded to {container_name}/{blob_name}")
         return blob_name
     except Exception as e:
@@ -136,18 +144,27 @@ def load_data_to_sql(container_name, blob_name, sql_table_name):
 
     json_data = blob_client.download_blob().readall()
 
-    # Connect to Azure SQL Database and insert data
+    # Parse JSON data
+    data_objects = json.loads(json_data.decode('utf-8'))
+
+    # Connect to Azure SQL Database
     sql_conn_str = conf.get('azure', 'sql_connection_string')
+    engine = create_engine(sql_conn_str) 
 
     try: 
-        engine = create_engine(sql_conn_str) 
-
         with engine.connect() as connection:
-            # Insert JSON data directly into SQL
-            insert_query = text(f"INSERT INTO {sql_table_name} (json_column) VALUES (:json_data)")
-            connection.execute(insert_query, json_data=json_data.decode('utf-8'))
+            for data_object in data_objects:
+                # Ensure data_object is a dictionary
+                if isinstance(data_object, dict):
+                    obj_json_data = json.dumps(data_object)
+                    insert_query = text(f"INSERT INTO {sql_table_name} (json_column) VALUES (:json_data)")
+                    connection.execute(insert_query, json_data=obj_json_data)
+                else:
+                    logging.error("Data object is not a dictionary")
     except Exception as e:
         logging.error(f"An error occurred while loading data to Azure SQL Database: {e}")
+
+
 
 # DAG definition remains the same
 default_args = {
