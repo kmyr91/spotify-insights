@@ -74,8 +74,9 @@ def fetch_spotify_data_api(endpoint):
         # Check if there is a next page
         next_page_url = albums.get('next')
 
+    # logging.info(f"Results type: {type(results)}") # list
     logging.info(f"Completed fetching data from {endpoint}")
-    return results
+    return json.dumps(results)
 
 
 
@@ -110,26 +111,18 @@ def upload_to_blob(data, container_name, endpoint_name):
         date_str = current_datetime.strftime("%Y-%m-%d")
         timestamp_str = current_datetime.strftime("%H%M%S")
 
-        # Constructing the blob name
         blob_name = f"{endpoint_name}/{date_str}/{endpoint_name}.{timestamp_str}.json"
-
-        # Create a BlobServiceClient using the connection string
         blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-        
-        # Get a reference to the target container
         container_client = blob_service_client.get_container_client(container_name)
-        
-        # Create a blob client using the container and blob name
         blob_client = container_client.get_blob_client(blob_name)
 
-        # Convert data to JSON
-        json_data = json.dumps(data, indent=4)
-
-        logging.info(f"data type after json.loads is: {type(json_data)}")
-
+        # Convert to JSON, then to bytes
+        json_data = json.loads(data)
+        json_string = json.dumps(json_data)
+        data_bytes = json_string.encode('utf-8')
         
         # Upload the data to Azure Blob Storage
-        blob_client.upload_blob(json_data, overwrite=True)
+        blob_client.upload_blob(data_bytes, overwrite=True)
         logging.info(f"Data successfully uploaded to {container_name}/{blob_name}")
         return blob_name
     except Exception as e:
