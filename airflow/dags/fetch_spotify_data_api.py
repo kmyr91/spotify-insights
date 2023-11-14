@@ -128,6 +128,24 @@ def upload_to_blob(data, container_name, endpoint_name):
     except Exception as e:
         logging.error(f"An error occurred while uploading data to Azure Blob Storage: {e}")
 
+def check_and_create_sql_table(sql_table_name):
+    # Connect to Azure SQL Database
+    sql_conn_str = conf.get('azure', 'sql_connection_string')
+    engine = create_engine(sql_conn_str) 
+
+    try: 
+        with engine.connect() as connection:
+            # Check if the table exists
+            try:
+                connection.execute(f"SELECT TOP 1 * FROM {sql_table_name}")
+                logging.info(f"Table '{sql_table_name}' already exists.")
+            except Exception as e:
+                logging.info(f"Table '{sql_table_name}' does not exist. Creating table...")
+                create_table_query = text(f"CREATE TABLE {sql_table_name} (id INT IDENTITY(1,1) PRIMARY KEY, json_column NVARCHAR(MAX) NOT NULL)")
+                connection.execute(create_table_query)
+                logging.info(f"Table '{sql_table_name}' created successfully.")
+    except Exception as e:
+        logging.error(f"An error occurred while connecting to Azure SQL Database: {e}")
 
 def load_data_to_sql(container_name, blob_name, sql_table_name):
     # Connect to Blob Storage and retrieve data
@@ -217,5 +235,13 @@ load_data_to_sql_task = PythonOperator(
     dag=dag,
 )
 
+check_and_create_sql_table_task = PythonOperator(
+    task_id='check_and_create_sql_table',
+    python_callable=check_and_create_sql_table,
+    op_kwargs={
+        'sql_table_name': 'new_releases'
+    },
+    dag=dag,
+)
 
-fetch_spotify_data_task >> check_and_create_container_task >> upload_to_blob_task >> load_data_to_sql_task
+fetch_spotify_data_task >> check_and_create_container_task >> upload_to_blob_task >> check_and_create_sql_table_task >> load_data_to_sql_task
