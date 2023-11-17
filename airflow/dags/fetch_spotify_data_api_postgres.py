@@ -130,27 +130,36 @@ def upload_to_blob(data, container_name, endpoint_name):
         logging.error(f"An error occurred while uploading data to Azure Blob Storage: {e}")
 
 def check_and_create_sql_table(sql_table_name):
-    # Connect to Azure SQL Database
-    sql_conn_str = conf.get('azure', 'sql_connection_string')
-    engine = create_engine(sql_conn_str) 
+    # Connect to PostgreSQL Database
+    sql_conn_str = "postgresql://admin:admin@postgres-dw:5432/spotify"
+
+    engine = create_engine(sql_conn_str)
 
     try: 
         with engine.connect() as connection:
             # Check if the table exists
             try:
-                connection.execute(f"SELECT TOP 1 * FROM {sql_table_name}")
+                # PostgreSQL uses the LIMIT clause instead of TOP
+                connection.execute(f"SELECT 1 FROM {sql_table_name} LIMIT 1")
                 logging.info(f"Table '{sql_table_name}' already exists.")
             except Exception as e:
                 logging.info(f"Table '{sql_table_name}' does not exist. Creating table...")
-                create_table_query = text(f"CREATE TABLE {sql_table_name} (id INT IDENTITY(1,1) PRIMARY KEY, json_column NVARCHAR(MAX) NOT NULL)")
+                # Adjusted SQL syntax for PostgreSQL
+                create_table_query = text(f"""
+                    CREATE TABLE {sql_table_name} (
+                        id SERIAL PRIMARY KEY,
+                        json_column TEXT NOT NULL
+                    )
+                """)
                 connection.execute(create_table_query)
                 logging.info(f"Table '{sql_table_name}' created successfully.")
     except Exception as e:
-        logging.error(f"An error occurred while connecting to Azure SQL Database: {e}")
+        logging.error(f"An error occurred while connecting to PostgreSQL Database: {e}")
+
 
 def load_data_to_sql(container_name, blob_name, sql_table_name):
     # Connect to Blob Storage and retrieve data
-    blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+    blob_service_client = BlobServiceClient.from_connection_string(conf.get('azure', 'blob_storage_conn_string'))
     container_client = blob_service_client.get_container_client(container_name)
     blob_client = container_client.get_blob_client(blob_name)
 
@@ -159,22 +168,23 @@ def load_data_to_sql(container_name, blob_name, sql_table_name):
     # Parse JSON data
     data_objects = json.loads(json_data.decode('utf-8'))
 
-    # Connect to Azure SQL Database
-    sql_conn_str = conf.get('azure', 'sql_connection_string')
-    engine = create_engine(sql_conn_str) 
+    # Connect to PostgreSQL Database
+    sql_conn_str = conf.get('postgres', 'sql_connection_string')  # Adjust to use PostgreSQL connection
+    engine = create_engine(sql_conn_str)
 
-    try: 
+    try:
         with engine.connect() as connection:
             for data_object in data_objects:
                 # Ensure data_object is a dictionary
                 if isinstance(data_object, dict):
                     obj_json_data = json.dumps(data_object)
+                    # Adjust the INSERT query for PostgreSQL
                     insert_query = text(f"INSERT INTO {sql_table_name} (json_column) VALUES (:json_data)")
                     connection.execute(insert_query, json_data=obj_json_data)
                 else:
                     logging.error("Data object is not a dictionary")
     except Exception as e:
-        logging.error(f"An error occurred while loading data to Azure SQL Database: {e}")
+        logging.error(f"An error occurred while loading data to PostgreSQL Database: {e}")
 
 
 
@@ -188,7 +198,7 @@ default_args = {
 }
 
 dag = DAG(
-    'hello_spotify_dag_api',
+    'hello_spotify_dag_api_postgres',
     default_args=default_args,
     description='A simple DAG to test Spotify API',
     schedule_interval=timedelta(days=1),
