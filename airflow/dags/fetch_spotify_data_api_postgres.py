@@ -131,7 +131,7 @@ def upload_to_blob(data, container_name, endpoint_name):
 
 def check_and_create_sql_table(sql_table_name):
     # Connect to PostgreSQL Database
-    sql_conn_str = "postgresql://admin:admin@postgres-dw:5432/spotify"
+    sql_conn_str = conf.get('postgres', 'sql_connection_string')
 
     engine = create_engine(sql_conn_str)
 
@@ -257,13 +257,13 @@ check_and_create_sql_table_task = PythonOperator(
 
 dbt_run = BashOperator(
     task_id='dbt_run',
-    bash_command='cd /dbt && dbt run',
+    bash_command='cd /opt/airflow/dbt/dbt_spotify && dbt run --target=postgres --models=new_releases_psql',
     dag=dag,
 )
 
 dbt_test = BashOperator(
     task_id='dbt_test',
-    bash_command='cd /dbt && dbt test',
+    bash_command='cd /opt/airflow/dbt/dbt_spotify && dbt test --target=postgres --models=new_releases_psql',
     dag=dag,
 )
 

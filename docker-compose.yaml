@@ -22,6 +22,14 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
 
+    AIRFLOW__AZURE__BLOB_STORAGE_CONN_STRING: DefaultEndpointsProtocol=https;AccountName=spotifyinsights;AccountKey=T7plg20/9CKNuE4gtcICWZ0UA+FEfxGtolLszgY+4SWwivQVh4F6p9bvJDY5HfJpUj+ABQYAW0vq+AStVlZqqA==;EndpointSuffix=core.windows.net
+    AIRFLOW__SPOTIFY__CLIENT_ID: 0f556990a6ee40cc9725f27760cee324
+    AIRFLOW__SPOTIFY__CLIENT_SECRET: d5a604403b1f4461b58c4f8cb552ca75
+    AIRFLOW__AZURE__SQL_CONNECTION_STRING: mssql+pyodbc://stava089:KamyarAli123!@sql-spotify-insights.database.windows.net:1433/sqldb-spotify-insights?driver=ODBC+Driver+18+for+SQL+Server
+    AIRFLOW__POSTGRES__SQL_CONNECTION_STRING: postgresql://admin:admin@postgres-dw:5432/spotify
+
+    DBT_PROFILES_DIR: /opt/airflow/dbt
+
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
@@ -31,11 +39,17 @@ x-airflow-common:
     # for other purpose (development, test and especially production usage) build/extend Airflow image.
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
   volumes:
-    - ${AIRFLOW_PROJ_DIR:-./airflow}/dags:/opt/airflow/dags
+    # - ./dbt/dbt_spotify/dags:/opt/airflow/dbt/dags
+    # - ./dbt/dbt_spotify/tests:/opt/airflow/dbt/tests
+    # - ./dbt/dbt_spotify/plugins:/opt/airflow/dbt/plugins
+    # - ./dbt/dbt_spotify/config:/opt/airflow/dbt/config
+    # - ./dbt/dbt_spotify/logs:/opt/airflow/dbt/logs
     - ${AIRFLOW_PROJ_DIR:-./airflow}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-./airflow}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-./airflow}/plugins:/opt/airflow/plugins
-    # - /dbt:/opt/airflow/dbt
+    - ${AIRFLOW_PROJ_DIR:-./airflow}/dags:/opt/airflow/dags
+    - ~/.dbt/profiles.yml:/opt/airflow/dbt/profiles.yml
+    - ./dbt:/opt/airflow/dbt
 
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
