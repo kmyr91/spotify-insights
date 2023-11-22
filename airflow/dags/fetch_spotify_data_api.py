@@ -247,13 +247,13 @@ check_and_create_sql_table_task = PythonOperator(
 
 dbt_run = BashOperator(
     task_id='dbt_run',
-    bash_command='cd /dbt && dbt run',
+    bash_command='cd /opt/airflow/dbt/dbt_spotify && dbt run --target=dev --models=new_releases',
     dag=dag,
 )
 
 dbt_test = BashOperator(
     task_id='dbt_test',
-    bash_command='cd /dbt && dbt test',
+    bash_command='cd /opt/airflow/dbt/dbt_spotify && dbt test --target=dev --models=new_releases',
     dag=dag,
 )
 
