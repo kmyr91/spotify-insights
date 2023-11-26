@@ -187,8 +187,6 @@ def load_data_to_sql(container_name, blob_name, sql_table_name):
         logging.error(f"An error occurred while loading data to PostgreSQL Database: {e}")
 
 
-
-# DAG definition remains the same
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,

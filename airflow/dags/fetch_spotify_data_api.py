@@ -148,7 +148,7 @@ def check_and_create_sql_table(sql_table_name):
     except Exception as e:
         logging.error(f"An error occurred while connecting to Azure SQL Database: {e}")
 
-def load_data_to_sql(container_name, blob_name, sql_table_name):
+def load_data_to_sql(container_name, blob_name, sql_table_name, json_key_column):
     # Connect to Blob Storage and retrieve data
     blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
     container_client = blob_service_client.get_container_client(container_name)
@@ -161,18 +161,38 @@ def load_data_to_sql(container_name, blob_name, sql_table_name):
 
     # Connect to Azure SQL Database
     sql_conn_str = conf.get('azure', 'sql_connection_string')
-    engine = create_engine(sql_conn_str) 
+    engine = create_engine(sql_conn_str)
 
     try: 
         with engine.connect() as connection:
-            for data_object in data_objects:
-                # Ensure data_object is a dictionary
-                if isinstance(data_object, dict):
-                    obj_json_data = json.dumps(data_object)
-                    insert_query = text(f"INSERT INTO {sql_table_name} (json_column) VALUES (:json_data)")
-                    connection.execute(insert_query, json_data=obj_json_data)
-                else:
-                    logging.error("Data object is not a dictionary")
+            # Check if table is empty
+            table_empty_check = text(f"SELECT COUNT(1) FROM {sql_table_name}")
+            result = connection.execute(table_empty_check).scalar()
+
+            if result == 0:  # If table is empty, use simple INSERT
+                for data_object in data_objects:
+                    if isinstance(data_object, dict):
+                        obj_json_data = json.dumps(data_object)
+                        insert_query = text(f"INSERT INTO {sql_table_name} (json_column) VALUES (:json_data)")
+                        connection.execute(insert_query, json_data=obj_json_data)
+            else:  # If table is not empty, use MERGE
+                for data_object in data_objects:
+                    if isinstance(data_object, dict):
+                        obj_json_data = json.dumps(data_object)
+                        unique_key_value = data_object.get(json_key_column)
+
+                        merge_query = text(f"""
+                            MERGE INTO {sql_table_name} AS target
+                            USING (SELECT :unique_key_value AS unique_key, :json_data AS json_column) AS source
+                            ON JSON_VALUE(target.json_column, '$.{json_key_column}') = source.unique_key
+                            WHEN MATCHED THEN
+                                UPDATE SET target.json_column = source.json_column
+                            WHEN NOT MATCHED THEN
+                                INSERT (json_column)
+                                VALUES (source.json_column);
+                        """)
+
+                        connection.execute(merge_query, unique_key_value=unique_key_value, json_data=obj_json_data)
     except Exception as e:
         logging.error(f"An error occurred while loading data to Azure SQL Database: {e}")
 
@@ -231,7 +251,8 @@ load_data_to_sql_task = PythonOperator(
     op_kwargs={
         'container_name': 'spotify-data',
         'blob_name': '{{ task_instance.xcom_pull(task_ids="upload_to_blob") }}',
-        'sql_table_name': 'new_releases'
+        'sql_table_name': 'new_releases',
+        'json_key_column': 'id'
     },
     dag=dag,
 )
