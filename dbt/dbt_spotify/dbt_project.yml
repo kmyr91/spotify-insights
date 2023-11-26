@@ -37,3 +37,7 @@ models:
     # Config indicated by + and applies to all files under models/example/
     example:
       +materialized: view
+
+tests:
+  my_project_name:
+    +as_columnstore: False
