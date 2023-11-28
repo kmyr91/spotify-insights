@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: new_releases
+    description: "New releases on Spotify"
+    columns:
+      - name: id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null
+      # Add other column definitions and tests for new_releases here...
+
+  - name: top_tracks
+    description: "Top tracks for artists on Spotify"
+    columns:
+      - name: id
+        description: "The unique identifier for the track"
+        tests:
+          - unique
+          - not_null
+      - name: name
+        description: "The name of the track"
+        tests:
+          - not_null
+      - name: popularity
+        description: "The popularity score of the track"
+      - name: artist_id
+        description: "The unique identifier for the artist"
+        tests:
+          - not_null
+      - name: artist_name
+        description: "The name of the artist"
