@@ -20,7 +20,7 @@ from sqlalchemy.sql import text
 AZURE_CONNECTION_STRING = conf.get('azure', 'blob_storage_conn_string')
 
 def fetch_spotify_data_api(endpoint):
-    market='ES'
+    
     logging.info(f"Starting to fetch Spotify data from {endpoint}")
 
     client_id = conf.get('spotify', 'client_id')
@@ -55,44 +55,84 @@ def fetch_spotify_data_api(endpoint):
     access_token = response_data['access_token']
 
     # Case 1: Fetch new releases
-    if endpoint == 'browse/new-releases':
-        new_releases_url = f"https://api.spotify.com/v1/{endpoint}"
-        new_releases_response = requests.get(new_releases_url, headers={"Authorization": f"Bearer {access_token}"})
-        if new_releases_response.status_code != 200:
-            logging.error(f"Failed to fetch new releases. Status Code: {new_releases_response.status_code}")
-            return
+    
+    new_releases_url = f"https://api.spotify.com/v1/{endpoint}"
+    new_releases_response = requests.get(new_releases_url, headers={"Authorization": f"Bearer {access_token}"})
+    if new_releases_response.status_code != 200:
+        logging.error(f"Failed to fetch new releases. Status Code: {new_releases_response.status_code}")
+            
 
-        new_releases_data = new_releases_response.json()
-        albums = new_releases_data.get('albums', {}).get('items', [])
-        return json.dumps(albums)
-
-    # Case 2: Fetch top tracks using artist IDs from new releases
-    elif endpoint == 'artist_top_tracks':
-        # Fetch new releases to get artist IDs
-        new_releases_response = requests.get("https://api.spotify.com/v1/browse/new-releases", headers={"Authorization": f"Bearer {access_token}"})
         new_releases_data = new_releases_response.json()
         albums = new_releases_data.get('albums', {}).get('items', [])
         artist_ids = set(album['artists'][0]['id'] for album in albums if album.get('artists'))
+        
+        # Push artist IDs to XCom
+        task_instance = kwargs['ti']
+        task_instance.xcom_push(key='artist_ids', value=list(artist_ids))
+        return json.dumps(albums)
 
-        # Fetch top tracks for each artist
-        artist_top_tracks = []
-        for artist_id in artist_ids:
-            top_tracks_url = f"https://api.spotify.com/v1/artists/{artist_id}/top-tracks?market=US"
-            top_tracks_response = requests.get(top_tracks_url, headers={"Authorization": f"Bearer {access_token}"})
-            if top_tracks_response.status_code == 200:
-                top_tracks_data = top_tracks_response.json().get('tracks', [])
-                artist_top_tracks.extend(top_tracks_data)
-            else:
-                logging.error(f"Failed to fetch top tracks for artist {artist_id}. Status Code: {top_tracks_response.status_code}")
 
-        return json.dumps(artist_top_tracks)
+def fetch_artists_top_tracks(endpoint, **kwargs):
+    
+    logging.info(f"Starting to fetch Spotify data from {endpoint}")
 
-    # Add more cases for other endpoints as needed
+    client_id = conf.get('spotify', 'client_id')
+    client_secret = conf.get('spotify', 'client_secret')
 
-    else:
-        logging.error(f"Invalid endpoint: {endpoint}")
+    if not client_id or not client_secret:
+        logging.error("Client ID or Client Secret is not set. Please check your Airflow Variables.")
         return
 
+    # Encoding client credentials
+    encoded_credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+
+    # Get the token
+    headers = {
+        "Authorization": f"Basic {encoded_credentials}"
+    }
+    payload = {
+        "grant_type": "client_credentials"
+    }
+    response = requests.post("https://accounts.spotify.com/api/token", headers=headers, data=payload)
+
+    if response.status_code != 200:
+        logging.error(f"Failed to get access token from Spotify API. Status Code: {response.status_code}")
+        return
+
+    response_data = response.json()
+
+    if 'access_token' not in response_data:
+        logging.error("Access token not found in the response.")
+        return
+
+    access_token = response_data['access_token']
+    
+    
+    task_instance = kwargs.get('ti')
+    artist_ids = task_instance.xcom_pull(task_ids='fetch_spotify_data_api', key='artist_ids')
+    market='ES'
+    if not artist_ids:
+        logging.error("No artist IDs found.")
+        return
+   
+    # Fetch new releases to get artist IDs
+    new_releases_response = requests.get("https://api.spotify.com/v1/browse/new-releases", headers={"Authorization": f"Bearer {access_token}"})
+    new_releases_data = new_releases_response.json()
+    albums = new_releases_data.get('albums', {}).get('items', [])
+        
+
+    # Fetch top tracks for each artist
+    artist_top_tracks = []
+    for artist_id in artist_ids:
+        top_tracks_url = f"https://api.spotify.com/v1/artists/{artist_id}/top-tracks?market=US"
+        top_tracks_response = requests.get(top_tracks_url, headers={"Authorization": f"Bearer {access_token}"})
+        if top_tracks_response.status_code == 200:
+            top_tracks_data = top_tracks_response.json().get('tracks', [])
+            artist_top_tracks.extend(top_tracks_data)
+        else:
+            logging.error(f"Failed to fetch top tracks for artist {artist_id}. Status Code: {top_tracks_response.status_code}")
+
+    return json.dumps(artist_top_tracks)
 
 def check_and_create_container(connection_string, container_name):
     try:
@@ -213,16 +253,19 @@ fetch_spotify_data_task = PythonOperator(
     op_kwargs={
         'endpoint': 'browse/new-releases'
     },
+    provide_context=True,  # Important to enable XComs
     dag=dag,
 )
 
 # Task for fetching top tracks
 fetch_artists_top_tracks_task = PythonOperator(
     task_id='fetch_artists_top_tracks',
-    python_callable=fetch_spotify_data_api,
+    python_callable=fetch_artists_top_tracks,
     op_kwargs={
         'endpoint': 'artist_top_tracks'
     },
+    provide_context=True,  # Important to enable XComs
+
     dag=dag,
 )
 
@@ -321,11 +364,12 @@ dbt_test = BashOperator(
 #fetch_artists_top_tracks_task >> check_and_create_container_task
 #check_and_create_container_task >> upload_to_blob_task >> check_and_create_sql_table_task >> load_data_to_sql_task >> dbt_run >> dbt_test
 
-# Dependencies for new releases data flow
+# New Releases Data Flow
 fetch_spotify_data_task >> check_and_create_container_task >> upload_to_blob_task >> check_and_create_sql_table_task >> load_data_to_sql_task
 
-# Dependencies for top tracks data flow
-fetch_artists_top_tracks_task >> check_and_create_container_task >> upload_top_tracks_to_blob_task >> check_and_create_top_tracks_table_task >> load_top_tracks_to_sql_task
+# Top Tracks Data Flow (dependent on fetch_spotify_data_task via XCom)
+fetch_artists_top_tracks_task >> upload_top_tracks_to_blob_task >> check_and_create_top_tracks_table_task >> load_top_tracks_to_sql_task
 
-# DBT run and test tasks should depend on both data flows being completed
+# DBT tasks should start after both data flows have been completed
 [load_data_to_sql_task, load_top_tracks_to_sql_task] >> dbt_run >> dbt_test
+
