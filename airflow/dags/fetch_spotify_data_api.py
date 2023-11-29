@@ -358,12 +358,6 @@ dbt_test = BashOperator(
 )
 
 
-
-# Define task dependencies
-#fetch_spotify_data_task >> check_and_create_container_task
-#fetch_artists_top_tracks_task >> check_and_create_container_task
-#check_and_create_container_task >> upload_to_blob_task >> check_and_create_sql_table_task >> load_data_to_sql_task >> dbt_run >> dbt_test
-
 # New Releases Data Flow
 fetch_spotify_data_task >> check_and_create_container_task >> upload_to_blob_task >> check_and_create_sql_table_task >> load_data_to_sql_task
 
